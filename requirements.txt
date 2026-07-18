@@ -1,0 +1,7 @@
+openai
+tiktoken
+transformers
+torch
+psycopg2-binary
+pgvector
+python-dotenv
