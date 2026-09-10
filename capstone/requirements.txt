@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+psycopg2-binary
+pgvector
+redis
+openai
+pydantic-settings
+python-dotenv
