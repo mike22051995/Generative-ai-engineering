@@ -1,5 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from database import execute_query
-from embedding import get_embedding
+from embedding import get_embedding,get_embeddings_batch
 from openai import OpenAI
 from config import settings
 
@@ -45,40 +46,40 @@ def rerank(query:str,chunks:list[dict],top_k:int=None)->list[dict]:
     More accurate than embedding similarity alone.
     """
     top_k=top_k or settings.TOP_K
-    reranked=[]
-
-
-    for chunk in chunks:
-        response=client.chat.completions.create(
-            model=settings.LLM_MODEL,
-            messages=[
-                {
-                    "role":"system",
-                    "content":"""you are relevance scorer.
-                    Score how well the given text answers the query.
+    
+    def score_chunk(chunk):
+        """Score a single chunk against the query."""
+        try:
+            response=client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role":"system",
+                    "content":"""you are a relevance scorer.
+                    score how will the given text answers the query.
                     0=completely irrelevant
-                    10=perfectly relevant
-                    No explanatioin. just the number."""
-                },
-                {"role":"user",
-                 "content":f"Query: {query}\n\n Text :{chunk['text']}"
-                 }
-            ],
+                    10=perfect;y answers the query
+                    No explanation. Just the number."""
+                    },
+                    {"role":"user",
+                     "content":f"Query: {query}\n\nText: {chunk["text"]}"
+                     }
+
+                ],
                 temperature=0.0,
                 max_tokens=5,
-                
-        )
-        try:
+            )
             score=float(response.choices[0].message.content.strip())
-        except ValueError:
+        except (ValueError,Exception):
             score=0.0
-        reranked.append({
-            "id":chunk["id"],
-            "text":chunk["text"],
-            "embedding_score":chunk["score"],
+        return {
+            "id":chunk['id'],
+            "text":chunk['text'],
+            "embedding_Score":chunk["score"],
             "rerank_score":score
-
-        })
+        }
+    #Run all scoring calls in parallel
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        reranked=list(executor.map(score_chunk,chunks))
     reranked.sort(key=lambda x:x["rerank_score"],reverse=True)
     return reranked[:top_k]
 
@@ -121,9 +122,10 @@ def mmr_retrieve(query:str, fetch_k:int=None, top_k:int=None,diversity:float=0.5
     if not results:
         return []
     #Build candidates with embeddings for MMR
+    texts=[row["content"] for row in results]
+    embeddings=get_embeddings_batch(texts)
     candidates=[]
-    for row in results:
-        embedding=get_embedding(row["content"])
+    for row, embedding in zip(results,embeddings):
         candidates.append({
             "id":row["id"],
             "text":row["content"],
@@ -135,7 +137,7 @@ def mmr_retrieve(query:str, fetch_k:int=None, top_k:int=None,diversity:float=0.5
     selected=[]
     remaining=candidates.copy()
     while len(selected)<top_k and remaining:
-        if not selected:
+        if not selected: 
             best=remaining[0]
         else:
             best=None
