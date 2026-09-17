@@ -1,50 +1,49 @@
 import re 
 from config import settings
 
-def recursive_chunk(text:str, chunk_size:int=None,overlap:int=None)->list[str]:
-    '''
-    Split text using recursive strategy.
-    Tries paragraph->sentence->word boundaries in order
-    Add overlap between chunks to preserve the context.
-    Use setting default if not specified.
-    '''
-    chunk_size=chunk_size or settings.CHUNK_SIZE
-    overlap=overlap or settings.CHUNK_OVERLAP
-    chunks=[]
-    current=""
-    #split on paragraph first
-    paragraphs=text.split("\n\n")
-    for para in paragraphs:
-        para=para.strip()
-        if not para:
+def recursive_chunk(text: str,
+                    chunk_size: int = None,
+                    overlap: int = None) -> list[str]:
+    """
+    Split text into chunks of roughly chunk_size characters.
+    Uses sentence boundaries where possible.
+    Adds overlap between chunks.
+    """
+    chunk_size = chunk_size or settings.CHUNK_SIZE
+    overlap = overlap or settings.CHUNK_OVERLAP
+
+    # Split into sentences first
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+
+    chunks = []
+    current = ""
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
             continue
-        if len(current)+len(para)<chunk_size:
-            current+=para+" "
+
+        if len(current) + len(sentence) < chunk_size:
+            current += sentence + " "
         else:
-            if current:
+            if current.strip():
                 chunks.append(current.strip())
-            if len(para)>chunk_size:
-                sentences=re.split(r'(?<=[.?!]\s++)',para)
-                for sent in sentences:
-                    if len(current)+len(sent)<chunk_size:
-                        current+=sent+ " "
-                    else:
-                        if current:
-                            chunks.append(current.strip())
-                            curr=sent+" "
-            else:
-                current=para + " "
+            current = sentence + " "
+
     if current.strip():
         chunks.append(current.strip())
-    chunks=[c for c in chunks if c.strip()]
-    #Add overlap between chunks
 
-    if overlap>0 and len(chunks)>1:
-        overlapped=[chunks[0]]
-        for i in range(1,len(chunks)):
-            prev_end=chunks[i-1][-overlap:]
-            overlapped.append(prev_end+ " " +chunks[i])
+    # Remove empty chunks
+    chunks = [c for c in chunks if len(c.strip()) > 20]
+
+    # Add overlap
+    if overlap > 0 and len(chunks) > 1:
+        overlapped = [chunks[0]]
+        for i in range(1, len(chunks)):
+            prev_end = chunks[i-1][-overlap:]
+            overlapped.append(prev_end + " " + chunks[i])
         return overlapped
+
     return chunks
 
 def chunk_document(text:str,metadata:dict=None)->  list[dict]:

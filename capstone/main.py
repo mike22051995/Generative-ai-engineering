@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,UploadFile, File, Form
+from pdf_extractor import extract_text_from_pdf, get_pdf_info
 from contextlib import asynccontextmanager
 from models import (
     DocumentsUploadRequest,
@@ -67,6 +68,59 @@ def upload_document(request:DocumentsUploadRequest):
             total_chunks=result["total_chunks"],
             message=f"Successfully indexed {result["chunks_indexed"]} chunks"
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/documents/pdf")
+async def upload_pdf(
+    file:UploadFile=File(...),
+    metadata:str=Form(default="{}")
+    ):
+    """
+    Upload a PDF document.
+    Extracts text, chunks,embeds, and stores in pgvector.
+    """
+    try:
+        if not file.filename.endswith(".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail= "Only PDF files are accepted"
+            )
+        pdf_bytes=await file.read()
+
+        #Get pdf info for logging
+        info= get_pdf_info(pdf_bytes)
+        print(f"Processing PDf:{file.filename}")
+        print(f"Pages: {info['page_count']}")
+
+        text=extract_text_from_pdf(pdf_bytes)
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from PDF. File may be scanned or image-scanned.")
+
+        #parse metadata
+        import json
+        try:
+            meta=json.loads(metadata)
+        except json.JSONDecodeError:
+            meta={}
+
+        #Run through existing ingest pipeline
+        result=ingest_document(
+            text=text,
+            filename=file.filename,
+            metadata=meta
+        )
+        return {
+            "status":result["status"],
+            "filename":file.filename,
+            "pages":info["page_count"],
+            "chunks_indexed":result.get("chunks_indexed",0),
+            "total_chunks":result.get("total_chunks",0),
+            "message":result.get("reason", f"Successfully indexed {result.get("chunks_indexed",0)} chunks")
+
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
